@@ -84,19 +84,56 @@ echo "[2/6] 生成 docker-compose 和启动脚本..."
 cp "$REPO_ROOT/docker-compose.base.yml" "$DEPLOY_DIR/"
 
 # docker-compose.yml — 基于 hobby 版本，修正路径、删除 build 块
-sed \
-    -e 's|./posthog/posthog/idl|./config/idl|g' \
-    -e 's|./posthog/docker/clickhouse|./config/clickhouse|g' \
-    -e 's|./posthog/docker/temporal|./config/temporal|g' \
-    -e 's|./posthog/docker/livestream|./config/livestream|g' \
-    -e 's|./posthog/posthog/user_scripts|./config/user_scripts|g' \
-    -e '/^        build:$/,/^            context: \.\/posthog\/rust$/d' \
-    -e '/^            context: \.\/posthog\/rust$/d' \
-    -e 's|SITE_URL: https://\$DOMAIN|SITE_URL: ${SITE_URL_SCHEME:-http}://$DOMAIN|g' \
-    -e "s|LIVESTREAM_HOST: 'https://\${DOMAIN}/livestream'|LIVESTREAM_HOST: '\${SITE_URL_SCHEME:-http}://\${DOMAIN}/livestream'|g" \
-    -e 's|OBJECT_STORAGE_PUBLIC_ENDPOINT: https://\$DOMAIN|OBJECT_STORAGE_PUBLIC_ENDPOINT: ${SITE_URL_SCHEME:-http}://$DOMAIN|g' \
-    -e "s|CADDY_HOST: '\$DOMAIN, http://, https://'|CADDY_HOST: '\$CADDY_HOST'|g" \
-    "$REPO_ROOT/docker-compose.hobby.yml" > "$DEPLOY_DIR/docker-compose.yml"
+# 使用 Python 处理：sed 无法正确删除多行嵌套的 YAML build: 块
+python3 -c "
+import re, sys
+
+with open(sys.argv[1]) as f:
+    lines = f.readlines()
+
+result = []
+skip = False
+build_indent = 0
+
+for line in lines:
+    stripped = line.rstrip('\n')
+    # 检测 build: 块开始（8空格缩进，即服务级属性）
+    if re.match(r'^        build:\s*$', stripped):
+        skip = True
+        build_indent = len(stripped) - len(stripped.lstrip())
+        continue
+    # 在 build 块内：跳过缩进更深的行
+    if skip:
+        current_indent = len(stripped) - len(stripped.lstrip()) if stripped.strip() else build_indent + 1
+        if current_indent > build_indent:
+            continue
+        else:
+            skip = False
+    result.append(line)
+
+text = ''.join(result)
+
+# 路径替换
+text = text.replace('./posthog/posthog/idl', './config/idl')
+text = text.replace('./posthog/docker/clickhouse', './config/clickhouse')
+text = text.replace('./posthog/docker/temporal', './config/temporal')
+text = text.replace('./posthog/docker/livestream', './config/livestream')
+text = text.replace('./posthog/posthog/user_scripts', './config/user_scripts')
+
+# SITE_URL: https → 变量
+text = text.replace('SITE_URL: https://\$DOMAIN', 'SITE_URL: \${SITE_URL_SCHEME:-http}://\$DOMAIN')
+text = re.sub(
+    r\"LIVESTREAM_HOST: 'https://\\\$\\{DOMAIN\\}/livestream'\",
+    \"LIVESTREAM_HOST: '\\\${SITE_URL_SCHEME:-http}://\\\${DOMAIN}/livestream'\",
+    text
+)
+text = text.replace('OBJECT_STORAGE_PUBLIC_ENDPOINT: https://\$DOMAIN',
+                     'OBJECT_STORAGE_PUBLIC_ENDPOINT: \${SITE_URL_SCHEME:-http}://\$DOMAIN')
+text = text.replace(\"CADDY_HOST: '\\\$DOMAIN, http://, https://'\",
+                     \"CADDY_HOST: '\\\$CADDY_HOST'\")
+
+sys.stdout.write(text)
+" "$REPO_ROOT/docker-compose.hobby.yml" > "$DEPLOY_DIR/docker-compose.yml"
 
 # compose/ 启动脚本 — 与 bin/deploy-hobby 生成的逻辑一致
 mkdir -p "$DEPLOY_DIR/compose"
