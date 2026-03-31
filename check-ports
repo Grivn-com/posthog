@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Check if ports required by PostHog hobby deployment are available.
+# Targets: Ubuntu / Rocky Linux (uses ss, no lsof dependency)
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+PORTS=(
+    "80:Caddy Proxy (HTTP)"
+    "443:Caddy Proxy (HTTPS)"
+    "5432:PostgreSQL"
+    "6379:Redis"
+    "8123:ClickHouse (HTTP)"
+    "9000:ClickHouse (Native)"
+    "9092:Kafka (Redpanda)"
+    "2181:Zookeeper"
+    "19000:MinIO API"
+    "19001:MinIO Console"
+    "7233:Temporal"
+    "8081:Temporal UI"
+    "8000:PostHog Web"
+)
+
+conflicts=0
+echo -e "${BOLD}PostHog (hobby) port availability check${NC}"
+echo "========================================="
+
+for entry in "${PORTS[@]}"; do
+    port="${entry%%:*}"
+    name="${entry#*:}"
+
+    line=$(ss -tlnp "sport = :${port}" 2>/dev/null | tail -n +2)
+    if [ -n "$line" ]; then
+        proc=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+' || echo "unknown")
+        pid=$(echo "$line" | grep -oP 'pid=\K[0-9]+' || echo "?")
+        echo -e "  ${RED}OCCUPIED${NC}  :${port}  ${name}  (pid=${pid} ${proc})"
+        conflicts=$((conflicts + 1))
+    else
+        echo -e "  ${GREEN}FREE${NC}      :${port}  ${name}"
+    fi
+done
+
+echo "========================================="
+if [ "$conflicts" -gt 0 ]; then
+    echo -e "${YELLOW}${conflicts} port(s) occupied.${NC} Stop conflicting processes before starting PostHog."
+    exit 1
+else
+    echo -e "${GREEN}All ports available.${NC}"
+    exit 0
+fi
