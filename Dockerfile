@@ -155,6 +155,7 @@ COPY common/migration_utils common/migration_utils/
 COPY posthog posthog/
 COPY products/ products/
 COPY ee ee/
+COPY customizations customizations/
 
 # Copy the built frontend assets and also the products.json file
 COPY --from=frontend-build /code/frontend/dist /code/frontend/dist
@@ -322,6 +323,7 @@ COPY --chown=posthog:posthog ee ee/
 COPY --chown=posthog:posthog common/hogvm common/hogvm/
 COPY --chown=posthog:posthog common/migration_utils common/migration_utils/
 COPY --chown=posthog:posthog products products/
+COPY --chown=posthog:posthog customizations customizations/
 
 # Validate video export dependencies
 RUN ffmpeg -version
