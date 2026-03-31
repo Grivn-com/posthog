@@ -25,10 +25,57 @@ echo ""
 
 mkdir -p "$DEPLOY_DIR"
 
-# 1. 复制部署脚本
+# 1. 复制部署脚本并生成 .env.template
 echo "[1/6] 复制部署脚本..."
 cp "$SCRIPT_DIR/install.sh" "$DEPLOY_DIR/"
-cp "$SCRIPT_DIR/.env.template" "$DEPLOY_DIR/"
+
+cat > "$DEPLOY_DIR/.env.template" <<'ENVEOF'
+# PostHog 部署环境变量
+# 复制为 .env 并修改以下值
+
+# ============ 必须修改 ============
+
+# 安全密钥（运行以下命令生成）:
+#   head -c 28 /dev/urandom | sha224sum -b | head -c 56
+POSTHOG_SECRET=<REPLACE_ME>
+
+# 加密盐（运行以下命令生成）:
+#   openssl rand -hex 16
+ENCRYPTION_SALT_KEYS=<REPLACE_ME>
+
+# 域名或 IP 地址
+# 有域名: analytics.your-company.com
+# 无域名: 192.168.2.30
+DOMAIN=192.168.2.30
+
+# ============ 镜像配置 ============
+
+# PostHog 主镜像（Python/Django + 前端）
+REGISTRY_URL=grivn/posthog
+POSTHOG_APP_TAG=v1.0.0
+
+# Node.js 服务镜像（plugins, ingestion）
+# 如果使用官方镜像，保持默认值
+POSTHOG_NODE_TAG=latest
+
+# ============ TLS / Caddy ============
+
+# 有域名时: TLS_BLOCK 留空，Caddy 自动获取 Let's Encrypt 证书
+# 无域名时: TLS_BLOCK 留空，CADDY_HOST 必须加 http:// 前缀
+TLS_BLOCK=
+
+# 有域名: "analytics.your-company.com, http://, https://"
+# 无域名: "http://192.168.2.30"
+CADDY_HOST="http://192.168.2.30"
+
+# ============ 可选配置 ============
+
+# 是否禁用匿名使用数据上报（默认上报给 PostHog 官方）
+OPT_OUT_CAPTURE=true
+
+# Docker 镜像前缀（如需使用镜像加速）
+# DOCKER_REGISTRY_PREFIX=registry.cn-hangzhou.aliyuncs.com/
+ENVEOF
 
 # 2. 生成 compose 定义和容器启动脚本（从仓库实时生成，不使用静态副本）
 echo "[2/6] 生成 docker-compose 和启动脚本..."
