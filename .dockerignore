@@ -6,6 +6,7 @@
 !common/hogvm
 !common/esbuilder
 !common/migration_utils
+!customizations
 !common/replay-headless
 !common/replay-shared
 !common/plugin_transpiler/*.*
