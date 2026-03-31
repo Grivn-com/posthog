@@ -97,6 +97,7 @@ INSTALLED_APPS = [
     # 'two_factor.plugins.yubikey',  # <- for yubikey capability.
     "oauth2_provider",
     "django_admin_inline_paginator",
+    "customizations.apps.CustomizationsConfig",
 ]
 
 MIDDLEWARE = [

@@ -364,20 +364,10 @@ export const userLogic = kea<userLogicType>([
     selectors({
         hasAvailableFeature: [
             (s) => [s.user],
-            (user) => {
-                return (feature: AvailableFeature, currentUsage?: number) => {
-                    const availableProductFeatures = user?.organization?.available_product_features
-                    if (availableProductFeatures && availableProductFeatures.length > 0) {
-                        const availableFeature = availableProductFeatures.find((obj) => obj.key === feature)
-                        return availableFeature
-                            ? currentUsage
-                                ? availableFeature?.limit
-                                    ? availableFeature?.limit > currentUsage
-                                    : true
-                                : true
-                            : false
-                    }
-                    return false
+            (_user) => {
+                // [CUSTOMIZATION] All features unlocked for self-hosted commercial build
+                return (_feature: AvailableFeature, _currentUsage?: number) => {
+                    return true
                 }
             },
         ],

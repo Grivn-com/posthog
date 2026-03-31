@@ -127,20 +127,9 @@ export const payGateMiniLogic = kea<payGateMiniLogicType>([
                 (_, props) => props.feature,
                 (_, props) => props.currentUsage,
             ],
-            (billingLoading, hasAvailableFeature, minimumPlanWithFeature, feature, currentUsage) => {
-                if (hasAvailableFeature(feature, currentUsage)) {
-                    return null
-                }
-                if (billingLoading) {
-                    return null
-                }
-                if (values.isCloudOrDev) {
-                    if (!minimumPlanWithFeature || minimumPlanWithFeature.contact_support) {
-                        return 'contact-sales'
-                    }
-                    return 'add-card'
-                }
-                return 'move-to-cloud'
+            // [CUSTOMIZATION] Always return null — no paywall gates
+            () => {
+                return null
             },
         ],
         ctaLink: [
