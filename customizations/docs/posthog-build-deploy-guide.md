@@ -164,78 +164,86 @@ PostHog **已经停止支持 Kubernetes/Helm 自托管部署**，官方推荐的
 └─────────────────────────────────────────────┘
 ```
 
-#### 部署步骤
+#### 部署步骤（使用部署安装包）
 
-**方法 A：使用官方脚本（适合快速体验）**
+整个部署分为两个阶段：**开发机打包** → **生产机安装**。
+
+##### 阶段一：在开发机上构建镜像和部署包
+
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/posthog/posthog/HEAD/bin/deploy-hobby)"
+cd /path/to/posthog   # 仓库根目录（pujun 分支）
+
+# 1. 构建 Docker 镜像
+docker build --network=host -t grivn/posthog:v1.0.0 .
+
+# 2. 推送到镜像仓库（Docker Hub / Harbor / 阿里云 ACR）
+docker push grivn/posthog:v1.0.0
+
+# 3. 生成部署安装包（自动收集所有配置文件）
+bash customizations/deploy/build-deploy-package.sh v1.0.0
+# 产出: posthog-deploy-v1.0.0.tar.gz
 ```
 
-**方法 B：手动部署（推荐用于商用版，可完全控制）**
-
-1. **准备服务器**（最低 8GB 内存，推荐 16GB+）
-
-2. **克隆你的商用版代码**
-```bash
-git clone your-repo.git posthog
-cd posthog
-git checkout pujun
+部署包内容（自包含，生产机无需克隆代码仓库）：
+```
+posthog-deploy/
+  ├── install.sh                 ← 一键安装脚本
+  ├── .env.template              ← 环境变量模板
+  ├── docker-compose.base.yml    ← 服务基础定义
+  ├── docker-compose.yml         ← 部署用 compose（路径已修正）
+  ├── compose/                   ← 容器启动脚本（挂载进容器执行）
+  │   ├── start                  ← web 容器入口: wait → migrate → server
+  │   ├── wait                   ← 等待 ClickHouse/Postgres 就绪
+  │   └── temporal-django-worker
+  ├── config/                    ← 配置文件（volume 挂载进各容器）
+  │   ├── clickhouse/            ← ClickHouse 配置
+  │   ├── temporal/dynamicconfig/ ← Temporal 动态配置
+  │   ├── livestream/            ← Livestream 配置
+  │   ├── idl/                   ← ClickHouse IDL 定义
+  │   ├── user_scripts/          ← ClickHouse UDF 二进制
+  │   ├── postgres-init-scripts/ ← PostgreSQL 初始化脚本
+  │   └── products/              ← 产品数据库路由
+  └── share/                     ← GeoIP 数据库（如开发机上有则包含）
 ```
 
-3. **构建自定义 Docker 镜像**
+##### 阶段二：在生产服务器上安装
+
 ```bash
-docker build -t your-company/posthog:v1.0.0 .
+# 1. 将部署包传输到服务器
+scp posthog-deploy-v1.0.0.tar.gz user@server:/opt/
+
+# 2. 解压
+cd /opt
+tar -xzf posthog-deploy-v1.0.0.tar.gz
+cd posthog-deploy
+
+# 3. 一键安装（交互式询问域名/IP，自动生成密钥、下载 GeoIP、启动服务）
+bash install.sh
+
+# 安装脚本会:
+#   - 生成 POSTHOG_SECRET 和 ENCRYPTION_SALT_KEYS
+#   - 询问域名/IP，自动判断 HTTPS/HTTP 模式
+#   - 生成 .env
+#   - 下载 GeoIP 数据库
+#   - docker compose up -d
+#   - 等待健康检查通过
 ```
 
-4. **配置环境变量** — 创建 `.env` 文件
+**手动配置（可选）**：如果不想用交互式安装，可以手动操作：
 ```bash
-# 安全密钥（必须修改）
-POSTHOG_SECRET=$(head -c 28 /dev/urandom | sha224sum -b | head -c 56)
-ENCRYPTION_SALT_KEYS=$(openssl rand -hex 16)
+# 复制并编辑环境变量
+cp .env.template .env
+vim .env   # 修改 DOMAIN、REGISTRY_URL、POSTHOG_APP_TAG 等
 
-# 域名
-DOMAIN=analytics.your-company.com
-
-# 镜像来源（指向你自己的镜像）
-REGISTRY_URL=your-company/posthog
-POSTHOG_APP_TAG=v1.0.0
-
-# TLS（Caddy 自动从 Let's Encrypt 获取证书）
-CADDY_TLS_BLOCK=
-CADDY_HOST="analytics.your-company.com, http://, https://"
-```
-
-5. **下载 GeoIP 数据库**
-```bash
+# 下载 GeoIP 数据库
 mkdir -p share
 curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress > share/GeoLite2-City.mmdb
-```
 
-6. **创建启动脚本** `compose/start`
-```bash
-#!/bin/bash
-./compose/wait
-./bin/migrate
-./bin/docker-server
-```
+# 启动
+docker compose up -d
 
-7. **启动服务**
-```bash
-cp docker-compose.base.yml docker-compose.base.yml
-cp docker-compose.hobby.yml docker-compose.yml
-
-# 修改 docker-compose.yml 中的镜像地址为你自己的镜像
-# 将 image: ${REGISTRY_URL:-posthog/posthog}:${POSTHOG_APP_TAG:-latest}
-# 改为你的私有镜像地址
-
-docker-compose up -d
-```
-
-8. **验证部署**
-```bash
-# 等待 5-10 分钟后检查健康状态
-curl -s http://localhost/_health
-# 应返回 200 OK
+# 等待 5-10 分钟后验证
+curl -s http://localhost/_health  # 应返回 200
 ```
 
 ### 3.2 数据持久化
