@@ -25,16 +25,69 @@ echo ""
 
 mkdir -p "$DEPLOY_DIR"
 
-# 1. 复制部署脚本和 compose 定义
+# 1. 复制部署脚本
 echo "[1/6] 复制部署脚本..."
 cp "$SCRIPT_DIR/install.sh" "$DEPLOY_DIR/"
 cp "$SCRIPT_DIR/.env.template" "$DEPLOY_DIR/"
-cp "$SCRIPT_DIR/docker-compose.yml" "$DEPLOY_DIR/"
+
+# 2. 生成 compose 定义和容器启动脚本（从仓库实时生成，不使用静态副本）
+echo "[2/6] 生成 docker-compose 和启动脚本..."
+
+# docker-compose.base.yml — 直接复制
 cp "$REPO_ROOT/docker-compose.base.yml" "$DEPLOY_DIR/"
 
-# 2. 复制容器启动脚本
-echo "[2/6] 复制容器启动脚本..."
-cp -r "$SCRIPT_DIR/compose" "$DEPLOY_DIR/"
+# docker-compose.yml — 基于 hobby 版本，修正路径、删除 build 块
+sed \
+    -e 's|./posthog/posthog/idl|./config/idl|g' \
+    -e 's|./posthog/docker/clickhouse|./config/clickhouse|g' \
+    -e 's|./posthog/docker/temporal|./config/temporal|g' \
+    -e 's|./posthog/docker/livestream|./config/livestream|g' \
+    -e 's|./posthog/posthog/user_scripts|./config/user_scripts|g' \
+    -e '/^        build:$/,/^            context: \.\/posthog\/rust$/d' \
+    -e '/^            context: \.\/posthog\/rust$/d' \
+    -e 's|SITE_URL: https://\$DOMAIN|SITE_URL: ${SITE_URL_SCHEME:-http}://$DOMAIN|g' \
+    -e "s|LIVESTREAM_HOST: 'https://\${DOMAIN}/livestream'|LIVESTREAM_HOST: '\${SITE_URL_SCHEME:-http}://\${DOMAIN}/livestream'|g" \
+    -e 's|OBJECT_STORAGE_PUBLIC_ENDPOINT: https://\$DOMAIN|OBJECT_STORAGE_PUBLIC_ENDPOINT: ${SITE_URL_SCHEME:-http}://$DOMAIN|g' \
+    -e "s|CADDY_HOST: '\$DOMAIN, http://, https://'|CADDY_HOST: '\$CADDY_HOST'|g" \
+    "$REPO_ROOT/docker-compose.hobby.yml" > "$DEPLOY_DIR/docker-compose.yml"
+
+# compose/ 启动脚本 — 与 bin/deploy-hobby 生成的逻辑一致
+mkdir -p "$DEPLOY_DIR/compose"
+
+cat > "$DEPLOY_DIR/compose/start" <<'STARTEOF'
+#!/bin/bash
+./compose/wait
+./bin/migrate
+./bin/docker-server
+STARTEOF
+
+cat > "$DEPLOY_DIR/compose/wait" <<'WAITEOF'
+#!/usr/bin/env python3
+
+import socket
+import time
+
+def loop():
+    print("Waiting for ClickHouse and Postgres to be ready")
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(('clickhouse', 9000))
+        print("Clickhouse is ready")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(('db', 5432))
+        print("Postgres is ready")
+    except ConnectionRefusedError:
+        time.sleep(5)
+        loop()
+
+loop()
+WAITEOF
+
+cat > "$DEPLOY_DIR/compose/temporal-django-worker" <<'TWEOF'
+#!/bin/bash
+./bin/temporal-django-worker
+TWEOF
+
 chmod +x "$DEPLOY_DIR/compose/"*
 
 # 3. 复制 ClickHouse 配置
