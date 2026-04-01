@@ -89,15 +89,15 @@ PostHog 由以下核心组件构成：
 **在本地构建主镜像：**
 ```bash
 # 构建自定义商用版镜像
-docker build -t your-company/posthog:latest .
+docker build -t grivn/posthog:latest .
 
 # 如果需要指定平台（例如在 Mac M 芯片上构建 Linux amd64）
-docker build --platform linux/amd64 -t your-company/posthog:latest .
+docker build --platform linux/amd64 -t grivn/posthog:latest .
 ```
 
 **Node.js 服务镜像（可选，如需独立部署）：**
 ```bash
-docker build -f Dockerfile.node -t your-company/posthog-node:latest .
+docker build -f Dockerfile.node -t grivn/posthog-node:latest .
 ```
 
 ### 2.3 前端单独构建（开发调试用）
@@ -293,8 +293,8 @@ bin/docker (入口)
 - 搭建私有 Docker Registry（Harbor/AWS ECR/阿里云容器镜像服务）
 - 构建镜像后推送到私有仓库
 ```bash
-docker build -t registry.your-company.com/posthog:v1.0.0 .
-docker push registry.your-company.com/posthog:v1.0.0
+docker build -t registry.grivn.com/posthog:v1.0.0 .
+docker push registry.grivn.com/posthog:v1.0.0
 ```
 
 ### 4.2 CI/CD 流水线
@@ -325,7 +325,7 @@ ee.py                # 企业版功能开关
 git pull origin pujun
 
 # 2. 重新构建镜像
-docker build -t your-company/posthog:v1.1.0 .
+docker build -t grivn/posthog:v1.1.0 .
 
 # 3. 更新 .env 中的版本号
 # POSTHOG_APP_TAG=v1.1.0
