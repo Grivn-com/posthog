@@ -70,6 +70,10 @@ CADDY_HOST="http://192.168.2.30"
 
 # ============ 可选配置 ============
 
+# HTTP 模式（无域名，纯 IP）时必须设为 false
+# HTTPS 模式（有域名）时保持 true
+SECURE_COOKIES=false
+
 # 是否禁用匿名使用数据上报（默认上报给 PostHog 官方）
 OPT_OUT_CAPTURE=true
 
@@ -131,6 +135,11 @@ text = text.replace('OBJECT_STORAGE_PUBLIC_ENDPOINT: https://\$DOMAIN',
                      'OBJECT_STORAGE_PUBLIC_ENDPOINT: \${SITE_URL_SCHEME:-http}://\$DOMAIN')
 text = text.replace(\"CADDY_HOST: '\\\$DOMAIN, http://, https://'\",
                      \"CADDY_HOST: '\\\$CADDY_HOST'\")
+
+# 在 web 服务的 DEPLOYMENT: 'hobby' 后注入 SECURE_COOKIES 环境变量
+text = text.replace(
+    \"            DEPLOYMENT: 'hobby'\",
+    \"            DEPLOYMENT: 'hobby'\n            SECURE_COOKIES: '\\\${SECURE_COOKIES:-true}'\")
 
 sys.stdout.write(text)
 " "$REPO_ROOT/docker-compose.hobby.yml" > "$DEPLOY_DIR/docker-compose.yml"

@@ -63,11 +63,13 @@ if [ ! -f .env ]; then
         # IP 地址 → HTTP 模式
         SITE_URL_SCHEME="http"
         CADDY_HOST="http://${DOMAIN}"
+        SECURE_COOKIES="false"
         echo "  检测到 IP 地址，使用 HTTP 模式"
     else
         # 域名 → HTTPS 模式
         SITE_URL_SCHEME="https"
         CADDY_HOST="${DOMAIN}, http://, https://"
+        SECURE_COOKIES="true"
         echo "  检测到域名，使用 HTTPS 模式（Caddy 自动获取证书）"
     fi
 
@@ -78,6 +80,7 @@ DOMAIN=${DOMAIN}
 SITE_URL_SCHEME=${SITE_URL_SCHEME}
 TLS_BLOCK=
 CADDY_HOST="${CADDY_HOST}"
+SECURE_COOKIES=${SECURE_COOKIES}
 REGISTRY_URL=${REGISTRY_URL:-grivn/posthog}
 POSTHOG_APP_TAG=${POSTHOG_APP_TAG:-v1.0.0}
 POSTHOG_NODE_TAG=${POSTHOG_NODE_TAG:-latest}
