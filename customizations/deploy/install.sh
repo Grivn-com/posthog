@@ -40,9 +40,11 @@ for f in docker-compose.base.yml docker-compose.yml compose/start compose/wait; 
     fi
 done
 
-# 生成 .env（如果不存在）
+# ============================================================
+# 1. 生成 .env（如果不存在）
+# ============================================================
 if [ ! -f .env ]; then
-    echo "[1/4] 生成环境变量..."
+    echo "[1/5] 生成环境变量..."
 
     POSTHOG_SECRET=$(head -c 28 /dev/urandom | sha224sum -b | head -c 56)
     ENCRYPTION_SALT_KEYS=$(openssl rand -hex 16)
@@ -79,38 +81,94 @@ ENCRYPTION_SALT_KEYS=${ENCRYPTION_SALT_KEYS}
 DOMAIN=${DOMAIN}
 SITE_URL_SCHEME=${SITE_URL_SCHEME}
 TLS_BLOCK=
-CADDY_HOST="${CADDY_HOST}"
+CADDY_HOST=${CADDY_HOST}
 SECURE_COOKIES=${SECURE_COOKIES}
 REGISTRY_URL=${REGISTRY_URL:-grivn/posthog}
-POSTHOG_APP_TAG=${POSTHOG_APP_TAG:-v1.0.0}
-POSTHOG_NODE_TAG=${POSTHOG_NODE_TAG:-latest}
+POSTHOG_APP_TAG=${POSTHOG_APP_TAG:-__POSTHOG_APP_TAG__}
+POSTHOG_NODE_TAG=${POSTHOG_NODE_TAG:-__POSTHOG_NODE_TAG__}
 OPT_OUT_CAPTURE=true
 EOF
 
     echo "  已生成 .env 文件"
 else
-    echo "[1/4] 使用已有 .env 文件"
+    echo "[1/5] 使用已有 .env 文件"
 fi
 
-# 下载 GeoIP 数据库（如果不存在）
-echo "[2/4] 检查 GeoIP 数据库..."
+# ============================================================
+# 2. 加载 Docker 镜像（如果存在 images.tar）
+# ============================================================
+if [ -f images.tar ]; then
+    echo "[2/5] 加载 Docker 镜像（首次可能需要几分钟）..."
+    docker load -i images.tar
+    echo "  镜像加载完成"
+else
+    echo "[2/5] 未发现离线镜像包，将在线拉取"
+fi
+
+# ============================================================
+# 3. 下载 GeoIP 数据库（如果不存在）
+# ============================================================
+echo "[3/5] 检查 GeoIP 数据库..."
 mkdir -p share
 if [ ! -f share/GeoLite2-City.mmdb ]; then
     echo "  下载 GeoLite2-City.mmdb..."
+    GEOIP_DOWNLOADED=false
+
+    # 辅助函数：用 brotli CLI 解压
+    download_with_brotli_cli() {
+        curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress > share/GeoLite2-City.mmdb 2>/dev/null
+    }
+
+    # 辅助函数：用 python3 brotli 模块解压
+    download_with_python_brotli() {
+        curl -L 'https://mmdbcdn.posthog.net/' --http1.1 -o /tmp/_geoip.br 2>/dev/null && \
+        python3 -c "import brotli,sys; sys.stdout.buffer.write(brotli.decompress(open('/tmp/_geoip.br','rb').read()))" > share/GeoLite2-City.mmdb && \
+        rm -f /tmp/_geoip.br
+    }
+
+    # 尝试 1: 系统已安装 brotli
     if command -v brotli &> /dev/null; then
-        curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress > share/GeoLite2-City.mmdb
-    else
+        download_with_brotli_cli && GEOIP_DOWNLOADED=true
+    fi
+
+    # 尝试 2: 通过包管理器安装 brotli
+    if [ "$GEOIP_DOWNLOADED" = false ]; then
         echo "  安装 brotli..."
-        apt-get update -qq && apt-get install -y -qq brotli > /dev/null 2>&1 || {
-            echo "  警告: 无法安装 brotli，跳过 GeoIP 下载。"
-            echo "  请手动下载: curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress > share/GeoLite2-City.mmdb"
-        }
+        if command -v apt-get &> /dev/null; then
+            (apt-get update -qq && apt-get install -y -qq brotli > /dev/null 2>&1) || true
+        elif command -v yum &> /dev/null; then
+            yum install -y -q brotli > /dev/null 2>&1 || true
+        elif command -v dnf &> /dev/null; then
+            dnf install -y -q brotli > /dev/null 2>&1 || true
+        fi
         if command -v brotli &> /dev/null; then
-            curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress > share/GeoLite2-City.mmdb
+            download_with_brotli_cli && GEOIP_DOWNLOADED=true
         fi
     fi
-    if [ -f share/GeoLite2-City.mmdb ]; then
+
+    # 尝试 3: 用 python3 brotli 模块
+    if [ "$GEOIP_DOWNLOADED" = false ] && command -v python3 &> /dev/null; then
+        # 先检查是否已有 brotli 模块
+        if python3 -c "import brotli" 2>/dev/null; then
+            download_with_python_brotli && GEOIP_DOWNLOADED=true
+        else
+            echo "  尝试 pip3 install brotli..."
+            pip3 install brotli > /dev/null 2>&1 || true
+            if python3 -c "import brotli" 2>/dev/null; then
+                download_with_python_brotli && GEOIP_DOWNLOADED=true
+            fi
+        fi
+    fi
+
+    if [ "$GEOIP_DOWNLOADED" = true ] && [ -f share/GeoLite2-City.mmdb ]; then
         echo "  GeoIP 数据库下载完成"
+    else
+        rm -f share/GeoLite2-City.mmdb
+        echo "  警告: 无法下载 GeoIP 数据库。部分服务（cymbal, feature-flags）可能无法启动。"
+        echo "  请手动下载:"
+        echo "    pip3 install brotli"
+        echo "    curl -L 'https://mmdbcdn.posthog.net/' --http1.1 -o /tmp/geo.br"
+        echo "    python3 -c \"import brotli,sys; sys.stdout.buffer.write(brotli.decompress(open('/tmp/geo.br','rb').read()))\" > share/GeoLite2-City.mmdb"
     fi
 else
     echo "  GeoIP 数据库已存在"
@@ -119,13 +177,22 @@ fi
 # 确保 compose 脚本可执行
 chmod +x compose/*
 
-# 启动服务
-echo "[3/4] 启动 PostHog 服务..."
-echo "  拉取镜像并启动容器（首次可能需要较长时间）..."
-$COMPOSE_CMD up -d
+# ============================================================
+# 4. 启动服务
+# ============================================================
+echo "[4/5] 启动 PostHog 服务..."
+echo "  启动容器（首次可能需要较长时间）..."
+if [ -f images.tar ]; then
+    # 离线模式：禁止拉取，使用已加载的镜像
+    $COMPOSE_CMD up -d --pull never
+else
+    $COMPOSE_CMD up -d
+fi
 
-# 健康检查
-echo "[4/4] 等待服务就绪..."
+# ============================================================
+# 5. 健康检查
+# ============================================================
+echo "[5/5] 等待服务就绪..."
 echo "  PostHog 首次启动需要 5-10 分钟（数据库迁移）"
 echo "  按 Ctrl+C 可跳过等待（服务会在后台继续启动）"
 
